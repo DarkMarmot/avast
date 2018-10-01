@@ -1,5 +1,0 @@
-defmodule Avast do
-
-
-
-end
