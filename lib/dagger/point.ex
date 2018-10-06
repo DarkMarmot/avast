@@ -1,18 +1,24 @@
-
 defmodule Dagger.Point do
   alias Dagger.Point
 
-  defstruct name: nil, value: nil, sources: MapSet.new(), outputs: MapSet.new(), formula: nil, type: nil
+  defstruct name: nil,
+            value: nil,
+            sources: MapSet.new(),
+            outputs: MapSet.new(),
+            formula: nil,
+            active: false,
+            ephemeral: false,
+            type: nil
 
   # triggers are a list of functions mapped to actions -- take event and return boolean
 
   # points can be type:
-  # action  --  has sources and outputs and formula and external trigger
+  # action  --  has sources and outputs and formula and ephemeral
   # state   --  no sources, no formula
   # target  --  has sources and formula
-  # view    --  no sources and formula
+  # view    --  formula only
+  # event   --  has sources and formula -- but ephemeral
 
-  # event   -- emitted
   # trigger -- map/filter to action
 
   @type name_set :: MapSet.t(atom)
@@ -20,21 +26,35 @@ defmodule Dagger.Point do
   @type t :: %Point{
                name: atom(),
                value: any(),
-               sources: name_set() | function(),
+               sources: name_set(),
                outputs: name_set(),
                formula: nil | function(),
-               type: nil | :state | :target | :view | :action
+               active: boolean(),
+               ephemeral: boolean(),
+               type: nil | :state | :target | :view | :action | :event
              }
 
-  def state(name, value) do
+  # todo remove value -- init via update only
+  def state(name) when is_atom(name) do
     %Point{
       name: name,
-      value: value,
       type: :state
     }
   end
 
-  def target(name, sources, formula) do
+  def event(name, formula, sources)
+      when is_atom(name) and is_function(formula) and is_list(sources) do
+    %Point{
+      name: name,
+      sources: MapSet.new(sources),
+      formula: formula,
+      type: :event,
+      ephemeral: true
+    }
+  end
+
+  def target(name, formula, sources)
+      when is_atom(name) and is_function(formula) and is_list(sources) do
     %Point{
       name: name,
       sources: MapSet.new(sources),
@@ -43,39 +63,35 @@ defmodule Dagger.Point do
     }
   end
 
-  def view(name, sources, formula) do
+  def view(name, formula)
+      when is_atom(name) and is_function(formula) do
     %Point{
       name: name,
-      sources: MapSet.new(sources), #not reactive
       formula: formula,
-      type: :view
+      type: :view,
+      active: true
     }
   end
 
-  def view(name, formula) when is_function(formula) do
-    %Point{
-      name: name,
-      formula: fn -> formula.() end,
-      type: :view
-    }
-  end
-
-  def view(name, value) do
+  def view(name, value)
+      when is_atom(name) do
     %Point{
       name: name,
       formula: fn -> value end,
-      type: :view
+      type: :view,
+      active: true
     }
   end
 
-  def action(name, sources, outputs, formula) do
+  def action(name, formula, sources, outputs)
+      when is_atom(name) and is_function(formula) and is_list(sources) and is_list(outputs) do
     %Point{
       name: name,
       sources: sources,
       outputs: outputs,
       formula: formula,
-      type: :action
+      type: :action,
+      ephemeral: true
     }
   end
-
 end

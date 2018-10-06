@@ -1,6 +1,4 @@
-
 defmodule Dagger.Event do
-
   alias Dagger.Event
 
   defstruct name: nil,
@@ -8,8 +6,8 @@ defmodule Dagger.Event do
             hops: []
 
   @type t :: %Event{
-                name: atom(),
-                value: any(),
-                hops: list()
-             }
+          name: atom(),
+          value: any(),
+          hops: list()
+        }
 end

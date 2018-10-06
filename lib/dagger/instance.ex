@@ -1,13 +1,12 @@
-
 defmodule Dagger.Instance do
   alias Dagger.Instance
 
   defstruct key: nil, node: nil
 
   @type t :: %Instance{
-               key: any(),
-               node: atom()
-             }
+          key: any(),
+          node: atom()
+        }
 
   def new(key \\ nil) do
     %Instance{
@@ -15,5 +14,4 @@ defmodule Dagger.Instance do
       key: key
     }
   end
-
 end
