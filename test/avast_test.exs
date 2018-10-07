@@ -62,9 +62,15 @@ defmodule DaggerTest do
         x * y
       end
 
+    # action can take states and views
+    # action output map or keyword list of states: values
+
     aa =
-      wire [:x, :y], to: [:z] do
-        x * y
+      wire [:kitty, :x, :y] do
+        %{
+          x: y + 1 + kitty,
+          y: x + 2
+        }
       end
 
     Logger.error("ff: #{inspect(ff)}")
@@ -85,16 +91,17 @@ defmodule DaggerTest do
         dog: "puppy",
         big: fn -> 100 end
       },
-      actions: %{
-        kitty: aa,
-        bunny: {fn _ -> "fur" end, [], []}
-      }
+      actions:
+        %{
+                 kitty: aa,
+          #        bunny: {fn e -> %{x: e} end, [], [:x]}
+        }
     }
 
     d =
       Dagger.create(schema)
       |> Dagger.update(%{x: 7, y: 9, z: 5})
-
+       |> Dagger.invoke_action(:kitty, 3)
     Logger.warn("#{inspect(d)}")
     #
     #        |> Dagger.update(%{x: 3, y: 2, z: 5})

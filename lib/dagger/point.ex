@@ -24,15 +24,15 @@ defmodule Dagger.Point do
   @type name_set :: MapSet.t(atom)
 
   @type t :: %Point{
-               name: atom(),
-               value: any(),
-               sources: name_set(),
-               outputs: name_set(),
-               formula: nil | function(),
-               active: boolean(),
-               ephemeral: boolean(),
-               type: nil | :state | :target | :view | :action | :event
-             }
+          name: atom(),
+          value: any(),
+          sources: name_set(),
+          outputs: name_set(),
+          formula: nil | function(),
+          active: boolean(),
+          ephemeral: boolean(),
+          type: nil | :state | :target | :view | :action | :event
+        }
 
   # todo remove value -- init via update only
   def state(name) when is_atom(name) do
@@ -83,12 +83,11 @@ defmodule Dagger.Point do
     }
   end
 
-  def action(name, formula, sources, outputs)
-      when is_atom(name) and is_function(formula) and is_list(sources) and is_list(outputs) do
+  def action(name, formula, sources)
+      when is_atom(name) and is_function(formula) do
     %Point{
       name: name,
-      sources: sources,
-      outputs: outputs,
+      sources: MapSet.new(sources),
       formula: formula,
       type: :action,
       ephemeral: true

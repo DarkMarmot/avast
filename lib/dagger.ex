@@ -6,7 +6,7 @@ defmodule Dagger do
   defstruct instance: nil,
             # map of name to container (states, targets, views, actions)
             points: %{},
-            # list of triggers to match events to actions
+            # list of triggers to match events  to actions
             triggers: [],
             cyclic: false,
             # topological sort of targets
@@ -32,13 +32,33 @@ defmodule Dagger do
     # sort targets
   end
 
+  def invoke_action(%Dagger{points: points} = dagger, name, value) do
+    point = Map.get(points, name)
+
+    source_values = resolve_sources(points, point.sources)
+    action_and_source_values = source_values |> Map.put(name, value)
+
+    updates =
+      point.formula.(action_and_source_values)
+      |> Enum.filter(fn {k, _v} -> get_type(points, k) == :state end)
+      |> Map.new()
+      |> Map.put(name, value)
+
+    dagger |> update(updates)
+  end
+
+  def get_type(points, name) do
+    point = Map.get(points, name)
+    point.type
+  end
+
   def define_actions(%Dagger{points: points} = dagger, actions) when is_map(actions) do
     new_points =
       actions
       |> Enum.reduce(
         points,
-        fn {name, {formula, sources, outputs}}, acc ->
-          action = Point.action(name, formula, [name | sources], outputs)
+        fn {name, {formula, sources}}, acc ->
+          action = Point.action(name, formula, sources)
           Map.put(acc, name, action)
         end
       )
@@ -223,14 +243,21 @@ defmodule Dagger do
   def update_targets(%Dagger{points: points, sorted_targets: sorted_targets} = dagger) do
     Logger.warn("sorted targets: #{inspect(sorted_targets)}")
 
+    # make it change all points on each pass
     new_points =
       sorted_targets
-      |> Enum.filter(fn target_name -> are_all_sources_active?(points, target_name) end)
       |> Enum.reduce(
         points,
         fn target_name, acc ->
-          target = Map.get(points, target_name)
-          new_target = update_target(acc, target)
+          target = Map.get(acc, target_name)
+          can_update = are_all_sources_active?(acc, target.sources)
+
+          new_target =
+            case can_update do
+              true -> update_target(acc, target)
+              false -> target
+            end
+
           Map.put(acc, target_name, new_target)
         end
       )
@@ -238,31 +265,31 @@ defmodule Dagger do
     %Dagger{dagger | points: new_points}
   end
 
-  def are_all_sources_active?(points, target_name) do
+  def are_all_sources_active?(points, sources) do
 
-    sources =
-      points
-      |> Map.get(target_name)
-      |> Map.get(:sources)
+      sources
       |> Enum.map(fn source_name -> Map.get(points, source_name) end)
       |> Enum.all?(fn point -> point.active end)
 
   end
 
   def update_target(%{} = points, %Point{sources: sources, formula: formula} = target) do
-    Logger.warn("update: #{inspect(points)}")
-
     value =
       points
       |> resolve_sources(sources)
       |> formula.()
 
+    Logger.warn("activating #{target.name}")
     %Point{target | value: value, active: true}
   end
 
   def resolve_sources(%{} = points, sources) do
     r =
       sources
+      |> Enum.reject(fn source_name ->
+        point = Map.get(points, source_name)
+        point.ephemeral
+      end)
       |> Enum.reduce(
         %{},
         fn source_name, acc ->
