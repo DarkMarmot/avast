@@ -43,65 +43,73 @@ defmodule DaggerTest do
     #    prod = fn %{x: x, y: y} -> x * y end
     #    div = fn %{x: x, z: z} -> x / z end
     #    sum = fn t -> t[:prod] + t[:div] end
-    sum = &Dagger.sum/1
-
-    cow = 90
-
-    div =
-      wire [:x, :z] do
-        x / z
-      end
-
-    sum =
-      wire [:prod, :div, :big] do
-        prod + div + cow + big
-      end
-
-    ff =
-      wire [:x, :y], cow: 5 do
-        x * y
-      end
+#    sum = &Dagger.sum/1
+#
+#    cow = 90
+#
+#    div =
+#      wire [:x, :z] do
+#        x / z
+#      end
+#
+#    sum =
+#      wire [:prod, :div, :big] do
+#        prod + div + cow + big
+#      end
+#
+#    ff =
+#      wire [:x, :y], cow: 5 do
+#        x * y
+#      end
 
     # action can take states and views
     # action output map or keyword list of states: values
 
-    aa =
-      wire [:kitty, :x, :y] do
-        %{
-          x: y + 1 + kitty,
-          y: x + 2
+    move_cmd =
+      wire [:move_cmd, :sector] do
+
+        {x, y} = move_cmd
+
+        updates = %{
+          x: x,
+          y: y,
+          sector: {Integer.floor_div(x, 50), Integer.floor_div(y, 50)},
+          last_sector: sector
         }
+
       end
 
-    Logger.error("ff: #{inspect(ff)}")
+    sector_changed =
+      wire [:move_cmd, :sector, :last_sector] do
+        sector != last_sector
+      end
+
+    sector_set =
+      wire [:sector_changed, :sector] do
+        []
+      end
 
     schema = %{
-      states: [:x, :y, :z],
+      states: [:x, :y, :sector, :last_sector],
+      effects: %{
+        sector_changed: sector_changed
+      },
       targets: %{
-        prod: ff,
-        #          wire([:x, :y], do: x * y),
-        #        prod: {prod, [:x, :y]},
-        div: div,
-        #        sum: {sum, [:prod, :div]}
-        # wire([:prod, :div], do: prod + div)
-        sum: sum
+        sector_set: sector_set
       },
       views: %{
-        cow: fn -> "meow" end,
-        dog: "puppy",
-        big: fn -> 100 end
       },
-      actions:
-        %{
-                 kitty: aa,
-          #        bunny: {fn e -> %{x: e} end, [], [:x]}
-        }
+      actions: %{
+        move_cmd: move_cmd
+      }
     }
 
     d =
       Dagger.create(schema)
-      |> Dagger.update(%{x: 7, y: 9, z: 5})
-       |> Dagger.invoke_action(:kitty, 3)
+#      |> Dagger.update(%{x: 7, y: 9})
+      |> Dagger.invoke_action(:move_cmd, {150, 310})
+#      |> Dagger.invoke_action(:kitty, 3)
+
     Logger.warn("#{inspect(d)}")
     #
     #        |> Dagger.update(%{x: 3, y: 2, z: 5})

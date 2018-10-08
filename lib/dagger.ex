@@ -1,11 +1,12 @@
 defmodule Dagger do
-  alias Dagger.{Point, Instance, Event, Trigger}
+  alias Dagger.{Point, Instance}
   # Directed Acyclic Graph Event Repo
   require Logger
 
   defstruct instance: nil,
             # map of name to container (states, targets, views, actions)
             points: %{},
+            ephemerals: MapSet.new(),
             # list of triggers to match events  to actions
             triggers: [],
             cyclic: false,
@@ -18,11 +19,17 @@ defmodule Dagger do
 
   def create(schema) do
     %Dagger{}
-    |> define_states(schema.states)
-    |> define_views(schema.views)
-    |> define_targets(schema.targets)
-    |> define_actions(schema.actions)
+    |> define_states(Map.get(schema, :states, %{}))
+    |> define_views(Map.get(schema, :views, %{}))
+    |> define_targets(Map.get(schema, :targets, %{}))
+    |> define_actions(Map.get(schema, :actions, %{}))
+    |> define_effects(Map.get(schema, :effects, %{}))
+    |> generate_outputs()
+    |> note_ephemerals()
     |> sort_targets()
+
+    # define all
+    # THEN add outputs
 
     #    |> define_views(schema.views)
 
@@ -30,6 +37,15 @@ defmodule Dagger do
 
     # todo add outputs to targets
     # sort targets
+  end
+
+  def note_ephemerals(%Dagger{points: points} = dagger) do
+    ephemerals =
+      points
+      |> Enum.filter(fn {_k, v} -> v.ephemeral end)
+      |> Enum.map(fn {k, _v} -> k end)
+      |> MapSet.new()
+    %Dagger{dagger | ephemerals: ephemerals}
   end
 
   def invoke_action(%Dagger{points: points} = dagger, name, value) do
@@ -63,7 +79,7 @@ defmodule Dagger do
         end
       )
 
-    # todo only output to states, all sources must exist, all outputs must be states
+    # todo verify: only output to states, all sources must exist, all outputs must be states
 
     %Dagger{dagger | points: new_points}
   end
@@ -103,13 +119,29 @@ defmodule Dagger do
         points,
         fn {name, {formula, sources}}, acc ->
           target = Point.target(name, formula, sources)
-          new_acc = acc |> add_outputs(name, sources)
-          Map.put(new_acc, name, target)
+#          new_acc = acc |> add_outputs(name, sources)
+          Map.put(acc, name, target)
         end
       )
 
     %Dagger{dagger | points: new_points}
   end
+
+  def define_effects(%Dagger{points: points} = dagger, %{} = effects) do
+    new_points =
+      effects
+      |> Enum.reduce(
+           points,
+           fn {name, {formula, sources}}, acc ->
+             effect = Point.effect(name, formula, sources)
+#             new_acc = acc |> add_outputs(name, sources)
+             Map.put(acc, name, effect)
+           end
+         )
+
+    %Dagger{dagger | points: new_points}
+  end
+
 
   defp add_point(%Dagger{points: points} = dagger, %Point{name: name} = point) do
     assert_not_yet_defined(dagger, point)
@@ -166,64 +198,29 @@ defmodule Dagger do
     {final_visits, final_dagger}
   end
 
-  def trigger(
-        %Dagger{triggers: triggers} = dagger,
-        action,
-        filter \\ nil,
-        transform \\ nil,
-        continue \\ false
-      ) do
-    t = Trigger.new(action, filter, transform, continue)
-    %Dagger{dagger | triggers: [t | triggers]}
-  end
+#  def trigger(
+#        %Dagger{triggers: triggers} = dagger,
+#        action,
+#        filter \\ nil,
+#        transform \\ nil,
+#        continue \\ false
+#      ) do
+#    t = Trigger.new(action, filter, transform, continue)
+#    %Dagger{dagger | triggers: [t | triggers]}
+#  end
 
-  #  def action(%Dagger{} = dagger, name, sources, outputs, formula) do
-  #    p = Point.action(name, formula, sources, outputs)
-  #
-  #    dagger
-  #    |> add_point(p)
-  #  end
-  #
-  #  def state(%Dagger{} = dagger, name, value \\ nil) do
-  #    p = Point.state(name, value)
-  #
-  #    dagger
-  #    |> add_point(p)
-  #  end
-  #
-  #  def view(%Dagger{} = dagger, name, sources, formula) when is_function(formula) do
-  #    p = Point.view(name, formula, sources)
-  #
-  #    dagger
-  #    |> add_point(p)
-  #  end
-  #
-  #  def view(%Dagger{} = dagger, name, value) do
-  #    p = Point.view(name, value)
-  #
-  #    dagger
-  #    |> add_point(p)
-  #  end
-  #
-  #  def target(%Dagger{} = dagger, name, sources, formula) do
-  #    p = Point.target(name, formula, sources)
-  #    Logger.error("ARGH")
-  #    Logger.warn("make target #{name}")
-  #    dagger
-  #    |> add_point(p)
-  #    |> add_outputs(name, sources)
-  #  end
 
   def get_targets(%Dagger{points: points}) do
     points
     |> Map.values()
-    |> Enum.filter(fn %Point{type: type} -> type == :target or type == :event end)
+    |> Enum.filter(fn %Point{type: type} -> type == :target or type == :effect end)
   end
 
   def update(%Dagger{} = dagger, updates) when is_map(updates) do
     dagger
     |> update_states(updates)
     |> update_targets()
+#    |> reset_ephemerals()
   end
 
   defp update_states(%Dagger{points: points} = dagger, updates) when is_map(updates) do
@@ -243,7 +240,6 @@ defmodule Dagger do
   def update_targets(%Dagger{points: points, sorted_targets: sorted_targets} = dagger) do
     Logger.warn("sorted targets: #{inspect(sorted_targets)}")
 
-    # make it change all points on each pass
     new_points =
       sorted_targets
       |> Enum.reduce(
@@ -265,12 +261,24 @@ defmodule Dagger do
     %Dagger{dagger | points: new_points}
   end
 
+  def reset_ephemerals(%Dagger{points: points, ephemerals: ephemerals} = dagger) do
+    new_points =
+      ephemerals
+      |> Enum.reduce(
+           points,
+           fn name, acc ->
+             point = Map.get(points, name)
+             Map.put(acc, name, %Point{point | active: false})
+           end
+         )
+
+    %Dagger{dagger | points: new_points}
+  end
+
   def are_all_sources_active?(points, sources) do
-
-      sources
-      |> Enum.map(fn source_name -> Map.get(points, source_name) end)
-      |> Enum.all?(fn point -> point.active end)
-
+    sources
+    |> Enum.map(fn source_name -> Map.get(points, source_name) end)
+    |> Enum.all?(fn point -> point.active end)
   end
 
   def update_target(%{} = points, %Point{sources: sources, formula: formula} = target) do
@@ -286,10 +294,10 @@ defmodule Dagger do
   def resolve_sources(%{} = points, sources) do
     r =
       sources
-      |> Enum.reject(fn source_name ->
-        point = Map.get(points, source_name)
-        point.ephemeral
-      end)
+#      |> Enum.reject(fn source_name ->
+#        point = Map.get(points, source_name)
+#        point.ephemeral
+#      end)
       |> Enum.reduce(
         %{},
         fn source_name, acc ->
@@ -303,26 +311,14 @@ defmodule Dagger do
     r
   end
 
-  def resolve_source(%Point{type: :state, value: value}) do
-    value
-  end
-
-  def resolve_source(%Point{type: :target, value: value}) do
-    value
-  end
 
   def resolve_source(%Point{type: :view, formula: formula}) do
     formula.()
   end
 
-  #  def resolve_sources(%{} = points, sources) do
-  #    sources
-  #    |> Enum.map(
-  #         fn source_name ->
-  #           source = Map.get(points, source_name)
-  #           {source_name, source.value}
-  #         end)
-  #  end
+  def resolve_source(%Point{value: value}) do
+    value
+  end
 
   #  def process_event(%Dagger{triggers: triggers} = dagger, %Event{name: name} = event) do
   #    case Map.get(triggers, name, nil) do
@@ -331,74 +327,30 @@ defmodule Dagger do
   #    end
   #  end
 
-  #  def process_action(%Dagger{} = dagger, %Action{sources: sources, formula: formula} = action, values \\ %{}) do
-  #
-  #      updates =
-  #        dagger
-  #        |> resolve_sources(sources)
-  #        |> Map.merge(values)
-  #        |> formula.()
-  #
-  #      dagger
-  #      |> update_states(updates)
-  #      |> update_targets()
-  #
-  #  end
-
-  #  def note_modifiers(%Dagger{modifiers_by_target: modifiers_by_target} = dagger, target_name, sources) do
-  #
-  #    reactive_sources = filter_reactive_sources(dagger, sources)
-  #    modifiers =
-  #      Map.get(modifiers_by_target, target_name, MapSet.new())
-  #      |> MapSet.union(MapSet.new(reactive_sources))
-  #
-  #    dagger |> put_in([:modifiers_by_target, target_name], modifiers)
-  #  end
-
-  #  def update_targets(%Dagger{targets: targets, line_of_attack: line_of_attack} = dagger) do
-  #
-  #    line_of_attack
-  #    |> Enum.reduce(targets,
-  #         fn target_name, acc ->
-  #           target = Map.get(targets, target_name)
-  #           new_target = update_target(dagger, target)
-  #           Map.put(acc, target_name, new_target)
-  #         end)
-  #
-  #  end
 
   #  def define_trigger(%Dagger{} = dagger, name, action) do
   #    dagger |> register(name, :triggers, action)
   #  end
 
-  #  defp update_dagger(%Dagger{} = dagger, path, value) do
-  #    put_in(dagger, path |> Enum.map(&Access.key/1), value)
-  #  end
-  #
-  #  defp update_element(%Dagger{} = dagger, element) do
-  #    name = element.name
-  #    category = Map.get(dagger.dictionary, name)
-  #    update_dagger(dagger, [category, name], element)
-  #  end
-
-  #  def wire_outputs(points, target_name, source_names) do
-  #    source_names
-  #    |> Enum.reduce(
-  #      points,
-  #      fn source_name, acc ->
-  #        source = Map.get(acc, source_name)
-  #        new_outputs = MapSet.put(source.outputs, target_name)
-  #        new_source = %Point{source | outputs: new_outputs}
-  #        Map.put(points, source_name, new_source)
-  #      end
-  #    )
-  #  end
+  def generate_outputs(%Dagger{points: points} = dagger) do
+    new_points =
+      points
+      |> Enum.filter(fn {_k, v} -> v.type == :effect || v.type == :target end)
+      |> Enum.map(fn {_k, v} -> v end)
+      |> Enum.reduce(points, fn target, acc -> add_outputs(acc, target.name, target.sources) end)
+      %Dagger{dagger | points: new_points}
+  end
 
   def add_outputs(%{} = points, target_name, source_names) do
     Logger.warn("add outputs: #{inspect(target_name)} with #{inspect(source_names)}")
 
     source_names
-    |> Enum.map(fn name -> Map.get(points, name) end)
+    |> Enum.map(fn name ->
+      Logger.warn("name #{inspect(name)}")
+      p = Map.get(points, name)
+      Logger.warn("point #{inspect(p)}")
+      p
+    end)
     |> Enum.filter(&(&1.type != :view))
     |> Enum.reduce(
       points,
@@ -410,39 +362,6 @@ defmodule Dagger do
     )
   end
 
-  #  def update_target(
-  #        %Dagger{} = dagger,
-  #        %Target{sources: sources, formula: formula, value: {current_value, _}} = target) do
-  #
-  #    source_values = resolve_source_values(dagger, sources)
-  #    new_value = formula.(current_value, source_values)
-  #    %Target{target | value: {new_value, current_value}, changed: new_value != current_value}
-  #  end
-  #
-  #  def resolve_source_value(%Dagger{dictionary: dictionary} = dagger, name) do
-  #    true = already_defined?(dagger, name)
-  #    source_type = Map.get(dictionary, name)
-  #    case source_type do
-  #      :state -> resolve_state_value(dagger, name)
-  #      :target -> resolve_target_value(dagger, name)
-  #      :view -> resolve_view_value(dagger, name)
-  #    end
-  #  end
-  #
-  #  def resolve_state_value(%Dagger{states: states}, name) do
-  #    %State{value: value} = Map.get(states, name)
-  #    value
-  #  end
-  #
-  #  def resolve_view_value(%Dagger{views: views}, name) do
-  #    view_func = Map.get(views, name)
-  #    view_func.()
-  #  end
-  #
-  #  def resolve_sources(%Dagger{dictionary: dictionary} = dagger, sources) when is_list(sources) do
-  #
-  #  end
-  #
 
   #
   #  def receive_event(%Event{} = event) do
@@ -463,17 +382,7 @@ defmodule Dagger do
   #
   #  end
 
-  #  defp perform_action(action, event, state) do
-  #
-  #    use_map = resolve_use_values(action.use)
-  #    change_map = action.transform.(event, use_map)
-  #    # apply changes to states, pass -- every target gets {new_value, old_value} map
-  #    # each target gets {current_map, prior_map}
-  #  end
-  #
-  #  defp resolve_use_values(names) do
-  #    %{}
-  #  end
+
 
   def mult(x, y) do
     x * y

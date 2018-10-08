@@ -13,11 +13,11 @@ defmodule Dagger.Point do
   # triggers are a list of functions mapped to actions -- take event and return boolean
 
   # points can be type:
-  # action  --  has sources and outputs and formula and ephemeral
+  # action  --  has sources and formula, is ephemeral -- conditional logic here only
   # state   --  no sources, no formula
   # target  --  has sources and formula
   # view    --  formula only
-  # event   --  has sources and formula -- but ephemeral
+  # effect  --  ephemeral target
 
   # trigger -- map/filter to action
 
@@ -31,7 +31,7 @@ defmodule Dagger.Point do
           formula: nil | function(),
           active: boolean(),
           ephemeral: boolean(),
-          type: nil | :state | :target | :view | :action | :event
+          type: nil | :state | :target | :action | :view | :effect
         }
 
   # todo remove value -- init via update only
@@ -42,13 +42,13 @@ defmodule Dagger.Point do
     }
   end
 
-  def event(name, formula, sources)
+  def effect(name, formula, sources)
       when is_atom(name) and is_function(formula) and is_list(sources) do
     %Point{
       name: name,
       sources: MapSet.new(sources),
       formula: formula,
-      type: :event,
+      type: :effect,
       ephemeral: true
     }
   end
